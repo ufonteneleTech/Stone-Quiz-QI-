@@ -1,0 +1,1857 @@
+// ============================================================================
+// STONE QUIZ QI
+// Quiz de Desenvolvimento de Sistemas — Edição Reino da Ciência.
+// O QI do seu cientista sobe a cada acerto e cai a cada erro.
+//
+// COMO USAR NO DARTPAD:
+// 1. Acesse https://dartpad.dev
+// 2. No menu superior, selecione o template "Flutter"
+// 3. Apague todo o conteúdo do editor e cole este arquivo inteiro
+// 4. Clique em "Run"
+//
+// Este arquivo usa apenas o pacote "flutter/material.dart" e bibliotecas
+// nativas do Dart (dart:async, dart:math), então roda sem configuração
+// extra no DartPad.
+//
+// NOVIDADES DESTA VERSÃO (revisão sênior):
+// - As alternativas erradas foram reescritas para terem tamanho e nível de
+//   detalhe parecidos com a resposta certa — antes era possível "chutar"
+//   pela alternativa mais longa na maioria das perguntas.
+// - As alternativas agora são embaralhadas a cada partida (a posição da
+//   resposta certa nunca se repete), eliminando qualquer padrão posicional.
+// - Rebranding temático: Stone Quiz QI, com o antigo "Modo Einstein"
+//   renomeado para "Modo Impossível" e conquistas com nomes novos.
+// ============================================================================
+
+import 'dart:async';
+import 'dart:math';
+import 'package:flutter/material.dart';
+
+void main() {
+  runApp(const StoneQuizApp());
+}
+
+// ============================================================================
+// TEMA — paleta inspirada em pedra, laboratório e fórmulas douradas
+// ============================================================================
+
+const Color kStoneDark = Color(0xFF16241E);
+const Color kStoneDarker = Color(0xFF0D1712);
+const Color kGold = Color(0xFFE0A93A);
+const Color kBgLight = Color(0xFFF4F7F2);
+const Color kTextDark = Color(0xFF20291F);
+const Color kTextMuted = Color(0xFF5B6B58);
+
+class StoneQuizApp extends StatelessWidget {
+  const StoneQuizApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Stone Quiz QI',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        useMaterial3: true,
+        scaffoldBackgroundColor: kBgLight,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: kStoneDark,
+          primary: kStoneDark,
+          secondary: kGold,
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: kStoneDark,
+          foregroundColor: Colors.white,
+          elevation: 0,
+        ),
+        fontFamily: 'Roboto',
+      ),
+      home: const HomeScreen(),
+    );
+  }
+}
+
+// ============================================================================
+// MODELOS
+// ============================================================================
+
+enum Difficulty { facil, medio, dificil, impossivel }
+
+const Map<Difficulty, String> kDifficultyLabel = {
+  Difficulty.facil: 'Fácil',
+  Difficulty.medio: 'Médio',
+  Difficulty.dificil: 'Difícil',
+  Difficulty.impossivel: 'Impossível',
+};
+
+const Map<Difficulty, int> kDifficultyPoints = {
+  Difficulty.facil: 10,
+  Difficulty.medio: 20,
+  Difficulty.dificil: 35,
+  Difficulty.impossivel: 50,
+};
+
+const Map<Difficulty, int> kDifficultyTime = {
+  Difficulty.facil: 45,
+  Difficulty.medio: 45,
+  Difficulty.dificil: 45,
+  Difficulty.impossivel: 30,
+};
+
+const Map<Difficulty, Color> kDifficultyColor = {
+  Difficulty.facil: Color(0xFF4C8C6B),
+  Difficulty.medio: kGold,
+  Difficulty.dificil: Color(0xFFB25B3E),
+  Difficulty.impossivel: Color(0xFF3B1F2B),
+};
+
+const Map<Difficulty, String> kDifficultyDescription = {
+  Difficulty.facil: 'Conceitos básicos de lógica e sintaxe simples.',
+  Difficulty.medio: 'Estruturas de dados, POO e SQL básico.',
+  Difficulty.dificil: 'Arquitetura, complexidade e padrões de projeto.',
+  Difficulty.impossivel:
+      'Perguntas de todos os níveis combinadas, com tempo reduzido — só para mentes verdadeiramente geniais.',
+};
+
+/// QI mínimo (recorde histórico) necessário para destravar o Modo Impossível.
+const double kImpossivelUnlockQI = 200;
+
+class Question {
+  final String id;
+  final String category;
+  final Difficulty difficulty;
+  final String text;
+  final List<String> options;
+  final int correctIndex;
+
+  const Question({
+    required this.id,
+    required this.category,
+    required this.difficulty,
+    required this.text,
+    required this.options,
+    required this.correctIndex,
+  });
+}
+
+/// Versão de uma [Question] com as alternativas embaralhadas para uma
+/// partida específica, para que a posição da resposta certa nunca seja
+/// previsível entre partidas.
+class PreparedQuestion {
+  final Question original;
+  final List<String> options;
+  final int correctIndex;
+
+  const PreparedQuestion({
+    required this.original,
+    required this.options,
+    required this.correctIndex,
+  });
+}
+
+PreparedQuestion _prepareQuestion(Question q, Random rng) {
+  final order = List<int>.generate(q.options.length, (i) => i)..shuffle(rng);
+  final shuffledOptions = [for (final i in order) q.options[i]];
+  final newCorrectIndex = order.indexOf(q.correctIndex);
+  return PreparedQuestion(
+    original: q,
+    options: shuffledOptions,
+    correctIndex: newCorrectIndex,
+  );
+}
+
+class Achievement {
+  final String id;
+  final String title;
+  final String description;
+
+  const Achievement(this.id, this.title, this.description);
+}
+
+// ============================================================================
+// CATEGORIAS
+// ============================================================================
+
+const List<String> kCategories = [
+  'Lógica de Programação',
+  'Estruturas de Dados',
+  'Banco de Dados',
+  'Engenharia de Software',
+  'POO',
+  'Redes',
+  'Segurança da Informação',
+  'Metodologias Ágeis',
+];
+
+// ============================================================================
+// CONQUISTAS (15) — tema Reino da Ciência
+// ============================================================================
+
+const List<Achievement> kAchievements = [
+  Achievement('primeiro_passo', 'Primeira Centelha', 'Responda sua primeira pergunta e acenda a chama do conhecimento.'),
+  Achievement('mente_desperta', 'Mente Reanimada', 'Alcance 150 de QI em uma partida.'),
+  Achievement('genio_formacao', 'Cientista em Formação', 'Alcance 200 de QI em uma partida.'),
+  Achievement('nivel_einstein', 'Nível Impossível', 'Alcance 250 de QI em uma partida.'),
+  Achievement('sem_erros', 'Fórmula Perfeita', 'Complete uma partida inteira sem nenhum erro.'),
+  Achievement('sequencia_ouro', 'Reação em Cadeia', 'Acerte 10 perguntas seguidas.'),
+  Achievement('imparavel', 'Explosão de Genialidade', 'Acerte 20 perguntas seguidas.'),
+  Achievement('contra_relogio', 'Velocidade da Luz', 'Responda corretamente em menos de 5 segundos.'),
+  Achievement('sobrevivente', 'Sobrevivente da Era da Pedra', 'Complete uma partida no modo Difícil.'),
+  Achievement('maratonista', 'Maratona Científica', 'Responda 100 perguntas no total (somando partidas).'),
+  Achievement('mestre_logica', 'Mestre dos Algoritmos', 'Acerte 20 perguntas de Lógica de Programação.'),
+  Achievement('mestre_dados', 'Arquiteto de Dados', 'Acerte 20 perguntas de Banco de Dados.'),
+  Achievement('full_stack', 'Enciclopédia Viva', 'Acerte pelo menos 1 pergunta de cada categoria.'),
+  Achievement('resiliente', 'Resiliência de Pedra', 'Erre 5 perguntas e ainda assim termine com QI positivo.'),
+  Achievement('lenda_do_quiz', 'Lenda do Reino da Ciência', 'Desbloqueie todas as outras 14 conquistas.'),
+];
+
+// ============================================================================
+// BANCO DE PERGUNTAS (48 perguntas — 8 categorias x 3 dificuldades x 2)
+// Alternativas erradas foram reescritas para terem extensão e nível de
+// detalhe parecidos com a resposta certa (sem "dar a resposta" pelo
+// tamanho do texto). As alternativas ainda são embaralhadas por partida.
+// ============================================================================
+
+const List<Question> kQuestionBank = [
+  // ---------- Lógica de Programação ----------
+  Question(
+    id: 'log_f1',
+    category: 'Lógica de Programação',
+    difficulty: Difficulty.facil,
+    text: 'Qual estrutura permite repetir um bloco de código enquanto uma condição for verdadeira?',
+    options: ['for', 'while', 'if', 'switch'],
+    correctIndex: 1,
+  ),
+  Question(
+    id: 'log_f2',
+    category: 'Lógica de Programação',
+    difficulty: Difficulty.facil,
+    text: 'O que é uma variável em programação?',
+    options: [
+      'Um espaço de memória reservado para guardar um valor',
+      'Um comando usado apenas para exibir mensagens de erro na tela',
+      'Um símbolo empregado somente para separar diferentes comandos dentro do código-fonte',
+      'Um componente de hardware dedicado ao processamento de dados',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'log_m1',
+    category: 'Lógica de Programação',
+    difficulty: Difficulty.medio,
+    text: 'O que caracteriza a recursividade?',
+    options: [
+      'Uma função que chama a si mesma',
+      'Um laço que se repete indefinidamente sem parar',
+      'Um tipo de variável cujo valor nunca pode ser alterado',
+      'Um operador que combina duas condições lógicas',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'log_m2',
+    category: 'Lógica de Programação',
+    difficulty: Difficulty.medio,
+    text: 'Qual é a complexidade de tempo de uma busca binária em um array ordenado?',
+    options: ['O(n)', 'O(n^2)', 'O(log n)', 'O(1)'],
+    correctIndex: 2,
+  ),
+  Question(
+    id: 'log_d1',
+    category: 'Lógica de Programação',
+    difficulty: Difficulty.dificil,
+    text: 'Em análise de algoritmos, o que representa a notação Big O?',
+    options: [
+      'O consumo total de memória RAM utilizada durante a execução do programa',
+      'O limite superior do crescimento de um algoritmo em função da entrada',
+      'A quantidade exata de segundos que o algoritmo leva para ser executado',
+      'O número total de linhas de código presentes na implementação do algoritmo',
+    ],
+    correctIndex: 1,
+  ),
+  Question(
+    id: 'log_d2',
+    category: 'Lógica de Programação',
+    difficulty: Difficulty.dificil,
+    text: 'Qual técnica de otimização armazena resultados de subproblemas para evitar recomputação?',
+    options: ['Programação dinâmica', 'Recursão simples', 'Ordenação bolha', 'Herança múltipla'],
+    correctIndex: 0,
+  ),
+
+  // ---------- Estruturas de Dados ----------
+  Question(
+    id: 'estr_f1',
+    category: 'Estruturas de Dados',
+    difficulty: Difficulty.facil,
+    text: "Qual estrutura de dados segue o princípio 'primeiro a entrar, primeiro a sair' (FIFO)?",
+    options: ['Pilha', 'Fila', 'Árvore', 'Grafo'],
+    correctIndex: 1,
+  ),
+  Question(
+    id: 'estr_f2',
+    category: 'Estruturas de Dados',
+    difficulty: Difficulty.facil,
+    text: "Qual estrutura de dados segue o princípio 'último a entrar, primeiro a sair' (LIFO)?",
+    options: ['Fila', 'Lista ligada', 'Pilha', 'Tabela hash'],
+    correctIndex: 2,
+  ),
+  Question(
+    id: 'estr_m1',
+    category: 'Estruturas de Dados',
+    difficulty: Difficulty.medio,
+    text: 'Em uma lista ligada simples, além de um valor, cada nó armazena o quê?',
+    options: [
+      'Uma referência para o nó anterior',
+      'Uma referência para o próximo nó',
+      'Um índice fixo dentro de um array',
+      'Uma cópia idêntica de todos os outros nós da lista',
+    ],
+    correctIndex: 1,
+  ),
+  Question(
+    id: 'estr_m2',
+    category: 'Estruturas de Dados',
+    difficulty: Difficulty.medio,
+    text: 'Qual estrutura é ideal para representar relações hierárquicas, como um sistema de arquivos?',
+    options: ['Fila', 'Árvore', 'Pilha', 'Vetor'],
+    correctIndex: 1,
+  ),
+  Question(
+    id: 'estr_d1',
+    category: 'Estruturas de Dados',
+    difficulty: Difficulty.dificil,
+    text: 'Em uma tabela hash, o que é uma colisão?',
+    options: [
+      'Quando duas chaves diferentes geram o mesmo índice',
+      'Quando a tabela hash perde todos os seus valores armazenados',
+      'Quando um valor é removido de forma incorreta da estrutura',
+      'Quando o array de dados é reorganizado em ordem crescente',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'estr_d2',
+    category: 'Estruturas de Dados',
+    difficulty: Difficulty.dificil,
+    text: 'Qual é a complexidade média de busca em uma árvore binária de busca balanceada?',
+    options: ['O(n)', 'O(log n)', 'O(n^2)', 'O(1)'],
+    correctIndex: 1,
+  ),
+
+  // ---------- Banco de Dados ----------
+  Question(
+    id: 'bd_f1',
+    category: 'Banco de Dados',
+    difficulty: Difficulty.facil,
+    text: 'Qual comando SQL é usado para buscar dados em uma tabela?',
+    options: ['INSERT', 'SELECT', 'DELETE', 'UPDATE'],
+    correctIndex: 1,
+  ),
+  Question(
+    id: 'bd_f2',
+    category: 'Banco de Dados',
+    difficulty: Difficulty.facil,
+    text: 'O que significa a sigla SQL?',
+    options: [
+      'Structured Query Language',
+      'Simple Query Logic',
+      'System Quality Level',
+      'Structured Question List',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'bd_m1',
+    category: 'Banco de Dados',
+    difficulty: Difficulty.medio,
+    text: 'O que é uma chave estrangeira (foreign key)?',
+    options: [
+      'Um campo que identifica unicamente um registro na própria tabela',
+      'Um campo que referencia a chave primária de outra tabela',
+      'Um tipo de índice exclusivo de um banco específico',
+      'Um comando utilizado para realizar backups periódicos',
+    ],
+    correctIndex: 1,
+  ),
+  Question(
+    id: 'bd_m2',
+    category: 'Banco de Dados',
+    difficulty: Difficulty.medio,
+    text: 'Qual cláusula SQL é usada para filtrar registros?',
+    options: ['ORDER BY', 'GROUP BY', 'WHERE', 'JOIN'],
+    correctIndex: 2,
+  ),
+  Question(
+    id: 'bd_d1',
+    category: 'Banco de Dados',
+    difficulty: Difficulty.dificil,
+    text: "O que garante a propriedade 'Atomicidade' em uma transação (ACID)?",
+    options: [
+      'Que a transação seja executada totalmente ou não seja executada',
+      'Que todos os dados armazenados sejam sempre criptografados automaticamente',
+      'Que as consultas ao banco sejam processadas com maior velocidade',
+      'Que o índice das tabelas seja reconstruído a cada nova transação',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'bd_d2',
+    category: 'Banco de Dados',
+    difficulty: Difficulty.dificil,
+    text: 'Qual forma normal elimina dependências transitivas em um banco relacional?',
+    options: [
+      'Primeira Forma Normal (1FN)',
+      'Segunda Forma Normal (2FN)',
+      'Terceira Forma Normal (3FN)',
+      'Forma Normal de Boyce-Codd',
+    ],
+    correctIndex: 2,
+  ),
+
+  // ---------- Engenharia de Software ----------
+  Question(
+    id: 'eng_f1',
+    category: 'Engenharia de Software',
+    difficulty: Difficulty.facil,
+    text: 'O que é um requisito funcional em um sistema?',
+    options: [
+      'Uma característica relacionada à velocidade de resposta do sistema',
+      'Uma ação ou função que o sistema deve executar',
+      'Um padrão visual definido para os elementos da interface',
+      'Um tipo específico de banco de dados relacional',
+    ],
+    correctIndex: 1,
+  ),
+  Question(
+    id: 'eng_f2',
+    category: 'Engenharia de Software',
+    difficulty: Difficulty.facil,
+    text: 'O que é um bug em um sistema?',
+    options: [
+      'Uma nova funcionalidade adicionada recentemente ao sistema',
+      'Um erro que causa comportamento inesperado',
+      'Um tipo de teste automatizado executado periodicamente',
+      'Um servidor dedicado exclusivamente ao ambiente de produção',
+    ],
+    correctIndex: 1,
+  ),
+  Question(
+    id: 'eng_m1',
+    category: 'Engenharia de Software',
+    difficulty: Difficulty.medio,
+    text: 'O que caracteriza a metodologia de desenvolvimento em cascata (Waterfall)?',
+    options: [
+      'Etapas sequenciais e bem definidas, uma após a outra',
+      'Entregas contínuas e iterativas realizadas a cada semana',
+      'Ausência quase total de qualquer tipo de documentação formal',
+      'Testes escritos antes da implementação do código em todos os casos',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'eng_m2',
+    category: 'Engenharia de Software',
+    difficulty: Difficulty.medio,
+    text: 'O que é refatoração de código?',
+    options: [
+      'Reescrever toda a lógica de negócio do sistema do zero',
+      'Melhorar a estrutura interna do código sem alterar seu comportamento externo',
+      'Traduzir o código-fonte para uma linguagem de programação diferente',
+      'Remover todos os comentários explicativos presentes no sistema',
+    ],
+    correctIndex: 1,
+  ),
+  Question(
+    id: 'eng_d1',
+    category: 'Engenharia de Software',
+    difficulty: Difficulty.dificil,
+    text: 'O que propõe o princípio de responsabilidade única (SRP) do SOLID?',
+    options: [
+      'Uma classe deve ter apenas um motivo para mudar',
+      'Todas as classes do sistema devem herdar de uma única classe base',
+      'O sistema inteiro deve ser executado em uma única thread',
+      'Todas as funções devem receber apenas um único parâmetro',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'eng_d2',
+    category: 'Engenharia de Software',
+    difficulty: Difficulty.dificil,
+    text: 'O que é dívida técnica?',
+    options: [
+      'O custo mensal que a empresa paga pela contratação de servidores em nuvem',
+      'O impacto futuro de soluções rápidas que comprometem a qualidade do código',
+      'Um tipo específico de licença jurídica aplicada a softwares comerciais pagos',
+      'O tempo total que a equipe gasta em reuniões periódicas de alinhamento',
+    ],
+    correctIndex: 1,
+  ),
+
+  // ---------- POO ----------
+  Question(
+    id: 'poo_f1',
+    category: 'POO',
+    difficulty: Difficulty.facil,
+    text: 'O que é uma classe em POO?',
+    options: [
+      'Um molde que define atributos e comportamentos de um objeto',
+      'Uma variável que pode ser acessada de qualquer parte do sistema',
+      'Um comando utilizado para repetir um bloco de instruções',
+      'Um tipo de banco de dados voltado para armazenamento em nuvem',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'poo_f2',
+    category: 'POO',
+    difficulty: Difficulty.facil,
+    text: 'O que é um objeto em POO?',
+    options: [
+      'Uma instância criada a partir de uma classe',
+      'Um comentário explicativo inserido dentro do código-fonte',
+      'Um tipo de erro que ocorre durante o processo de compilação',
+      'Um arquivo responsável por armazenar configurações do sistema',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'poo_m1',
+    category: 'POO',
+    difficulty: Difficulty.medio,
+    text: 'O que é herança em POO?',
+    options: [
+      'A capacidade de uma classe reutilizar atributos e métodos de outra',
+      'A criação de múltiplas variáveis compartilhando exatamente o mesmo nome',
+      'Um tipo de laço utilizado para repetir instruções diversas vezes',
+      'A conversão automática entre diferentes tipos de dados',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'poo_m2',
+    category: 'POO',
+    difficulty: Difficulty.medio,
+    text: 'O que é encapsulamento?',
+    options: [
+      'Expor publicamente todos os atributos internos de uma classe',
+      'Ocultar os detalhes internos de um objeto e controlar o acesso a eles',
+      'Duplicar o mesmo trecho de código entre diferentes classes',
+      'Remover métodos que não estão mais sendo utilizados no sistema',
+    ],
+    correctIndex: 1,
+  ),
+  Question(
+    id: 'poo_d1',
+    category: 'POO',
+    difficulty: Difficulty.dificil,
+    text: 'O que é polimorfismo em POO?',
+    options: [
+      'A capacidade de um objeto assumir múltiplos comportamentos conforme o contexto',
+      'A criação de uma única classe genérica responsável por todo o sistema inteiro',
+      'A proibição total e definitiva de sobrescrever métodos herdados de outra classe',
+      'Um tipo de estrutura de dados utilizada para organizar valores em memória',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'poo_d2',
+    category: 'POO',
+    difficulty: Difficulty.dificil,
+    text: 'O que caracteriza uma classe abstrata?',
+    options: [
+      'Não pode ser instanciada diretamente e pode conter métodos não implementados',
+      'É sempre considerada, por definição, a classe mais específica dentro do sistema',
+      'Não pode conter absolutamente nenhum atributo declarado em sua definição',
+      'Existe apenas dentro do contexto específico de bancos de dados relacionais',
+    ],
+    correctIndex: 0,
+  ),
+
+  // ---------- Redes ----------
+  Question(
+    id: 'redes_f1',
+    category: 'Redes',
+    difficulty: Difficulty.facil,
+    text: 'O que significa a sigla IP em redes de computadores?',
+    options: ['Internet Protocol', 'Internal Process', 'Input Panel', 'Interface Program'],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'redes_f2',
+    category: 'Redes',
+    difficulty: Difficulty.facil,
+    text: 'Qual protocolo é usado para transferir páginas web?',
+    options: ['FTP', 'SMTP', 'HTTP', 'SSH'],
+    correctIndex: 2,
+  ),
+  Question(
+    id: 'redes_m1',
+    category: 'Redes',
+    difficulty: Difficulty.medio,
+    text: 'Qual é a principal diferença entre TCP e UDP?',
+    options: [
+      'TCP é orientado à conexão e confiável; UDP não garante entrega',
+      'TCP e UDP funcionam de maneira exatamente idêntica em todos os casos',
+      'UDP é sempre significativamente mais lento do que o protocolo TCP',
+      'O protocolo TCP não faz uso de portas para comunicação em rede',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'redes_m2',
+    category: 'Redes',
+    difficulty: Difficulty.medio,
+    text: 'O que faz um servidor DNS?',
+    options: [
+      'Armazena de forma segura as senhas cadastradas pelos usuários',
+      'Traduz nomes de domínio em endereços IP correspondentes',
+      'Compacta arquivos grandes antes de serem enviados pela rede',
+      'Gerencia as permissões de acesso aos arquivos do sistema',
+    ],
+    correctIndex: 1,
+  ),
+  Question(
+    id: 'redes_d1',
+    category: 'Redes',
+    difficulty: Difficulty.dificil,
+    text: 'Em uma arquitetura de rede, o que é um firewall?',
+    options: [
+      'Um dispositivo ou software que filtra o tráfego com base em regras de segurança',
+      'Um tipo específico de cabo físico utilizado apenas em redes locais de computadores',
+      'Um protocolo responsável exclusivamente pelo envio e recebimento de e-mails',
+      'Um servidor dedicado ao armazenamento centralizado de bancos de dados',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'redes_d2',
+    category: 'Redes',
+    difficulty: Difficulty.dificil,
+    text: 'O que caracteriza o modelo OSI?',
+    options: [
+      'Um framework com 7 camadas que padroniza a comunicação em redes',
+      'Uma linguagem de programação criada especificamente para redes',
+      'Um único protocolo responsável por toda a camada de transporte',
+      'Um tipo de banco de dados distribuído entre vários servidores',
+    ],
+    correctIndex: 0,
+  ),
+
+  // ---------- Segurança da Informação ----------
+  Question(
+    id: 'seg_f1',
+    category: 'Segurança da Informação',
+    difficulty: Difficulty.facil,
+    text: 'O que é uma senha forte?',
+    options: [
+      'Uma senha curta e fácil de memorizar rapidamente',
+      'Uma combinação longa com letras, números e símbolos variados',
+      'O mesmo nome de usuário repetido como senha de acesso',
+      'Uma sequência numérica simples, como 123456',
+    ],
+    correctIndex: 1,
+  ),
+  Question(
+    id: 'seg_f2',
+    category: 'Segurança da Informação',
+    difficulty: Difficulty.facil,
+    text: 'O que é phishing?',
+    options: [
+      'Uma técnica utilizada para otimizar consultas em bancos de dados',
+      'Uma tentativa de enganar usuários para obter dados sensíveis',
+      'Um tipo de firewall instalado em servidores corporativos',
+      'Um protocolo utilizado para criptografar dados em trânsito',
+    ],
+    correctIndex: 1,
+  ),
+  Question(
+    id: 'seg_m1',
+    category: 'Segurança da Informação',
+    difficulty: Difficulty.medio,
+    text: 'O que é criptografia?',
+    options: [
+      'Um método para transformar dados em um formato ilegível sem a chave correta',
+      'Um tipo de vírus que se instala automaticamente em segundo plano no computador',
+      'Uma técnica utilizada para reduzir o tamanho de arquivos antes do envio',
+      'Um protocolo utilizado especificamente para conexões de rede sem fio',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'seg_m2',
+    category: 'Segurança da Informação',
+    difficulty: Difficulty.medio,
+    text: 'O que é autenticação de dois fatores (2FA)?',
+    options: [
+      'Usar duas senhas completamente idênticas ao mesmo tempo',
+      'Uma camada extra de verificação além da senha, como um código no celular',
+      'Realizar login duas vezes seguidas com a mesma senha cadastrada',
+      'Um tipo de firewall utilizado para proteger redes corporativas',
+    ],
+    correctIndex: 1,
+  ),
+  Question(
+    id: 'seg_d1',
+    category: 'Segurança da Informação',
+    difficulty: Difficulty.dificil,
+    text: 'O que caracteriza um ataque de SQL Injection?',
+    options: [
+      'Inserir comandos SQL maliciosos através de campos de entrada não validados',
+      'Sobrecarregar a rede com uma quantidade excessiva de pacotes de dados',
+      'Interceptar sinais de redes Wi-Fi localizadas nas proximidades',
+      'Substituir fisicamente um servidor por outro equipamento',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'seg_d2',
+    category: 'Segurança da Informação',
+    difficulty: Difficulty.dificil,
+    text: 'O que é o princípio do menor privilégio em segurança?',
+    options: [
+      'Conceder a cada usuário apenas as permissões estritamente necessárias',
+      'Conceder acesso total a todos os usuários por padrão do sistema',
+      'Utilizar sempre a mesma senha para todos os sistemas acessados',
+      'Desativar completamente a autenticação para agilizar os acessos',
+    ],
+    correctIndex: 0,
+  ),
+
+  // ---------- Metodologias Ágeis ----------
+  Question(
+    id: 'agil_f1',
+    category: 'Metodologias Ágeis',
+    difficulty: Difficulty.facil,
+    text: 'O que é um Sprint em metodologias ágeis como o Scrum?',
+    options: [
+      'Um período de tempo fixo dedicado a entregar um incremento do produto',
+      'Um tipo específico de banco de dados utilizado em projetos ágeis',
+      'Uma reunião única realizada apenas no início do projeto',
+      'Um documento formal contendo todos os requisitos do sistema',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'agil_f2',
+    category: 'Metodologias Ágeis',
+    difficulty: Difficulty.facil,
+    text: 'O que é o Product Backlog?',
+    options: [
+      'Uma lista priorizada de funcionalidades e tarefas do produto',
+      'Um tipo de servidor dedicado exclusivamente para testes',
+      'Um relatório detalhado sobre o orçamento financeiro do projeto',
+      'Um diagrama que representa a topologia da rede utilizada',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'agil_m1',
+    category: 'Metodologias Ágeis',
+    difficulty: Difficulty.medio,
+    text: 'Qual é o papel do Scrum Master em um time ágil?',
+    options: [
+      'Definir sozinho todas as funcionalidades que o produto deve ter',
+      'Remover impedimentos e garantir que o time siga as práticas ágeis',
+      'Escrever pessoalmente todo o código-fonte do sistema',
+      'Aprovar individualmente o orçamento total do projeto',
+    ],
+    correctIndex: 1,
+  ),
+  Question(
+    id: 'agil_m2',
+    category: 'Metodologias Ágeis',
+    difficulty: Difficulty.medio,
+    text: 'O que é uma Daily (reunião diária) no Scrum?',
+    options: [
+      'Uma reunião curta e diária para alinhar o progresso do time',
+      'Uma avaliação formal realizada apenas uma vez por ano',
+      'Uma apresentação voltada especificamente para investidores',
+      'Um teste utilizado para avaliar a carga do sistema',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'agil_d1',
+    category: 'Metodologias Ágeis',
+    difficulty: Difficulty.dificil,
+    text: 'O que diferencia Kanban de Scrum de forma mais marcante?',
+    options: [
+      'Kanban não utiliza sprints com duração fixa, focando em fluxo contínuo',
+      'Kanban exige a realização obrigatória de reuniões diárias',
+      'O Scrum não permite a utilização de quadros visuais de tarefas',
+      'Kanban só pode ser aplicado em projetos voltados para hardware',
+    ],
+    correctIndex: 0,
+  ),
+  Question(
+    id: 'agil_d2',
+    category: 'Metodologias Ágeis',
+    difficulty: Difficulty.dificil,
+    text: "O que representa o conceito de 'Definition of Done' (Definição de Pronto)?",
+    options: [
+      'Um conjunto de critérios que uma tarefa deve atender para ser considerada concluída',
+      'O prazo final estabelecido em contrato para a entrega de todo o projeto',
+      'O nome dado oficialmente pela equipe ao último sprint de um projeto',
+      'Um tipo de teste automatizado utilizado para avaliar a performance do sistema',
+    ],
+    correctIndex: 0,
+  ),
+];
+
+// ============================================================================
+// ESTATÍSTICAS E CONQUISTAS (estado global em memória)
+//
+// Observação: para manter o exemplo simples e 100% compatível com o DartPad,
+// os dados vivem em memória (zerados a cada execução). Para persistência
+// entre sessões em um app real, use o pacote `shared_preferences`.
+// ============================================================================
+
+class GameStats {
+  GameStats._();
+  static final GameStats instance = GameStats._();
+
+  double maxQI = 0;
+  int totalQuestions = 0;
+  int totalCorrect = 0;
+  int totalWrong = 0;
+  int bestStreakEver = 0;
+  int gamesPlayed = 0;
+  double totalResponseTime = 0;
+  int responseCount = 0;
+
+  final Map<String, int> categoryCorrect = {for (final c in kCategories) c: 0};
+  final Map<Difficulty, int> correctByDifficulty = {for (final d in Difficulty.values) d: 0};
+  final Map<Difficulty, int> wrongByDifficulty = {for (final d in Difficulty.values) d: 0};
+
+  final Set<String> unlockedAchievements = {};
+
+  double get avgResponseTime => responseCount == 0 ? 0 : totalResponseTime / responseCount;
+
+  double get accuracy => totalQuestions == 0 ? 0 : (totalCorrect / totalQuestions) * 100;
+
+  String? get strongestCategory {
+    String? best;
+    int bestCount = 0;
+    categoryCorrect.forEach((cat, count) {
+      if (count > bestCount) {
+        bestCount = count;
+        best = cat;
+      }
+    });
+    return best;
+  }
+
+  String? get weakestCategory {
+    final withAnswers = categoryCorrect.entries.where((e) => e.value > 0).toList();
+    if (withAnswers.isEmpty) return null;
+    withAnswers.sort((a, b) => a.value.compareTo(b.value));
+    return withAnswers.first.key;
+  }
+
+  /// Chamado logo após cada resposta (certa, errada ou tempo esgotado).
+  /// Retorna a lista de ids de conquistas desbloqueadas agora.
+  List<String> registerAnswer({
+    required bool correct,
+    required Difficulty difficulty,
+    required String category,
+    required double responseTimeSeconds,
+    required int currentStreak,
+    required double currentQI,
+  }) {
+    totalQuestions++;
+    totalResponseTime += responseTimeSeconds;
+    responseCount++;
+
+    if (correct) {
+      totalCorrect++;
+      correctByDifficulty[difficulty] = (correctByDifficulty[difficulty] ?? 0) + 1;
+      categoryCorrect[category] = (categoryCorrect[category] ?? 0) + 1;
+      if (currentStreak > bestStreakEver) bestStreakEver = currentStreak;
+    } else {
+      totalWrong++;
+      wrongByDifficulty[difficulty] = (wrongByDifficulty[difficulty] ?? 0) + 1;
+    }
+
+    if (currentQI > maxQI) maxQI = currentQI;
+
+    final List<String> newly = [];
+    void tryUnlock(String id) {
+      if (!unlockedAchievements.contains(id)) {
+        unlockedAchievements.add(id);
+        newly.add(id);
+      }
+    }
+
+    if (totalQuestions == 1) tryUnlock('primeiro_passo');
+    if (correct && responseTimeSeconds < 5) tryUnlock('contra_relogio');
+    if (currentStreak >= 10) tryUnlock('sequencia_ouro');
+    if (currentStreak >= 20) tryUnlock('imparavel');
+    if (currentQI >= 150) tryUnlock('mente_desperta');
+    if (currentQI >= 200) tryUnlock('genio_formacao');
+    if (currentQI >= 250) tryUnlock('nivel_einstein');
+    if (totalQuestions >= 100) tryUnlock('maratonista');
+    if ((categoryCorrect['Lógica de Programação'] ?? 0) >= 20) tryUnlock('mestre_logica');
+    if ((categoryCorrect['Banco de Dados'] ?? 0) >= 20) tryUnlock('mestre_dados');
+    if (kCategories.every((c) => (categoryCorrect[c] ?? 0) > 0)) tryUnlock('full_stack');
+
+    _maybeUnlockLegend(newly);
+    return newly;
+  }
+
+  /// Chamado ao final de cada partida.
+  List<String> finishMatch({
+    required Difficulty difficulty,
+    required int wrongInMatch,
+    required double finalQI,
+  }) {
+    gamesPlayed++;
+
+    final List<String> newly = [];
+    void tryUnlock(String id) {
+      if (!unlockedAchievements.contains(id)) {
+        unlockedAchievements.add(id);
+        newly.add(id);
+      }
+    }
+
+    if (wrongInMatch == 0) tryUnlock('sem_erros');
+    if (difficulty == Difficulty.dificil) tryUnlock('sobrevivente');
+    if (wrongInMatch >= 5 && finalQI > 0) tryUnlock('resiliente');
+
+    _maybeUnlockLegend(newly);
+    return newly;
+  }
+
+  void _maybeUnlockLegend(List<String> newly) {
+    if (unlockedAchievements.contains('lenda_do_quiz')) return;
+    final others = kAchievements.where((a) => a.id != 'lenda_do_quiz');
+    final allUnlocked = others.every((a) => unlockedAchievements.contains(a.id));
+    if (allUnlocked) {
+      unlockedAchievements.add('lenda_do_quiz');
+      newly.add('lenda_do_quiz');
+    }
+  }
+}
+
+/// Formata o QI no padrão brasileiro (vírgula), sem casas decimais quando
+/// o valor é inteiro — ex.: 100 -> "100", 96.5 -> "96,5".
+String formatQI(double value) {
+  if (value % 1 == 0) return value.toStringAsFixed(0);
+  return value.toStringAsFixed(1).replaceAll('.', ',');
+}
+
+// ============================================================================
+// TELA INICIAL
+// ============================================================================
+
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final stats = GameStats.instance;
+    return Scaffold(
+      backgroundColor: kStoneDark,
+      body: Stack(
+        children: [
+          // Fundo em gradiente com um brilho dourado sutil atrás do título
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [kStoneDarker, kStoneDark, Color(0xFF1C2E24)],
+              ),
+            ),
+          ),
+          Positioned(
+            top: -60,
+            right: -60,
+            child: Container(
+              width: 220,
+              height: 220,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [kGold.withOpacity(0.22), Colors.transparent],
+                ),
+              ),
+            ),
+          ),
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: kStoneDarker,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: kGold),
+                      boxShadow: [
+                        BoxShadow(color: kGold.withOpacity(0.25), blurRadius: 16, spreadRadius: 1),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Icon(Icons.auto_awesome, color: kGold, size: 14),
+                        SizedBox(width: 6),
+                        Text(
+                          'REINO DA CIÊNCIA',
+                          style: TextStyle(color: kGold, fontWeight: FontWeight.bold, letterSpacing: 1.2, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ShaderMask(
+                    shaderCallback: (bounds) => const LinearGradient(
+                      colors: [Colors.white, kGold],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ).createShader(bounds),
+                    child: const Text(
+                      'STONE\nQUIZ QI',
+                      style: TextStyle(color: Colors.white, fontSize: 48, fontWeight: FontWeight.w900, height: 1.05),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Desperte sua mente científica e prove que nenhum\ndesafio é grande demais para sua inteligência.',
+                    style: TextStyle(color: Color(0xFFC7D8CB), fontSize: 15, height: 1.4),
+                  ),
+                  const SizedBox(height: 20),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.06),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white.withOpacity(0.12)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.science, color: kGold, size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Recorde de QI: ${formatQI(stats.maxQI == 0 ? 100 : stats.maxQI)}',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Spacer(),
+                  _HomeButton(
+                    label: 'Jogar',
+                    icon: Icons.play_arrow_rounded,
+                    filled: true,
+                    onTap: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const DifficultyScreen()));
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  _HomeButton(
+                    label: 'Estatísticas',
+                    icon: Icons.bar_chart_rounded,
+                    filled: false,
+                    onTap: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const StatisticsScreen()));
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  _HomeButton(
+                    label: 'Conquistas',
+                    icon: Icons.emoji_events_rounded,
+                    filled: false,
+                    onTap: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const AchievementsScreen()));
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool filled;
+  final VoidCallback onTap;
+
+  const _HomeButton({
+    required this.label,
+    required this.icon,
+    required this.filled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      height: 56,
+      child: filled
+          ? Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(color: kGold.withOpacity(0.35), blurRadius: 18, offset: const Offset(0, 8)),
+                ],
+              ),
+              child: ElevatedButton.icon(
+                onPressed: onTap,
+                icon: Icon(icon),
+                label: Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kGold,
+                  foregroundColor: kStoneDarker,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+              ),
+            )
+          : OutlinedButton.icon(
+              onPressed: onTap,
+              icon: Icon(icon, color: Colors.white),
+              label: Text(label, style: const TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold)),
+              style: OutlinedButton.styleFrom(
+                backgroundColor: Colors.white.withOpacity(0.04),
+                side: const BorderSide(color: Colors.white54),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+    );
+  }
+}
+
+// ============================================================================
+// TELA DE SELEÇÃO DE DIFICULDADE
+// ============================================================================
+
+class DifficultyScreen extends StatelessWidget {
+  const DifficultyScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final unlockedImpossivel = GameStats.instance.maxQI >= kImpossivelUnlockQI;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Escolha a Dificuldade')),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          for (final d in Difficulty.values)
+            _DifficultyCard(
+              difficulty: d,
+              locked: d == Difficulty.impossivel && !unlockedImpossivel,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DifficultyCard extends StatelessWidget {
+  final Difficulty difficulty;
+  final bool locked;
+
+  const _DifficultyCard({required this.difficulty, required this.locked});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = kDifficultyColor[difficulty]!;
+    final points = kDifficultyPoints[difficulty]!;
+    final time = kDifficultyTime[difficulty]!;
+
+    return Opacity(
+      opacity: locked ? 0.5 : 1,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(color: color.withOpacity(0.18), blurRadius: 14, offset: const Offset(0, 6)),
+          ],
+        ),
+        child: Material(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: locked
+                ? () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('O Modo Impossível se desbloqueia com QI ${formatQI(kImpossivelUnlockQI)}+ em uma partida.')),
+                    );
+                  }
+                : () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => QuizScreen(difficulty: difficulty)),
+                    );
+                  },
+            child: IntrinsicHeight(
+              child: Row(
+                children: [
+                  Container(width: 6, color: color),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 26,
+                            backgroundColor: color,
+                            child: locked
+                                ? const Icon(Icons.lock, color: Colors.white)
+                                : Text(
+                                    kDifficultyLabel[difficulty]![0],
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
+                                  ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  kDifficultyLabel[difficulty]!,
+                                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: kTextDark),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  kDifficultyDescription[difficulty]!,
+                                  style: const TextStyle(fontSize: 12.5, color: kTextMuted),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  '+$points por acerto  •  -${(points * 0.1).toStringAsFixed(points % 10 == 0 ? 0 : 1).replaceAll('.', ',')} por erro  •  ${time}s',
+                                  style: const TextStyle(fontSize: 11.5, color: kTextMuted, fontStyle: FontStyle.italic),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right, color: kTextMuted),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// TELA DO QUIZ
+// ============================================================================
+
+class QuizScreen extends StatefulWidget {
+  final Difficulty difficulty;
+
+  const QuizScreen({super.key, required this.difficulty});
+
+  @override
+  State<QuizScreen> createState() => _QuizScreenState();
+}
+
+class _QuizScreenState extends State<QuizScreen> {
+  late List<PreparedQuestion> matchQuestions;
+  int currentIndex = 0;
+  double qi = 100;
+  int correctCount = 0;
+  int wrongCount = 0;
+  int currentStreak = 0;
+  int maxStreakInMatch = 0;
+  int timeLeft = 0;
+  Timer? timer;
+  int? selectedOption;
+  bool answered = false;
+  DateTime? questionStartTime;
+  final Set<String> unlockedThisMatch = {};
+
+  @override
+  void initState() {
+    super.initState();
+    final rng = Random();
+    final pool = widget.difficulty == Difficulty.impossivel
+        ? List<Question>.from(kQuestionBank)
+        : kQuestionBank.where((q) => q.difficulty == widget.difficulty).toList();
+    pool.shuffle(rng);
+    matchQuestions = pool.take(10).map((q) => _prepareQuestion(q, rng)).toList();
+    _startQuestion();
+  }
+
+  @override
+  void dispose() {
+    timer?.cancel();
+    super.dispose();
+  }
+
+  int get totalTime => kDifficultyTime[widget.difficulty]!;
+
+  void _startQuestion() {
+    answered = false;
+    selectedOption = null;
+    timeLeft = totalTime;
+    questionStartTime = DateTime.now();
+    timer?.cancel();
+    timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return;
+      setState(() {
+        timeLeft--;
+        if (timeLeft <= 0) {
+          t.cancel();
+          _handleAnswer(null);
+        }
+      });
+    });
+  }
+
+  void _handleAnswer(int? index) {
+    if (answered) return;
+    timer?.cancel();
+
+    final question = matchQuestions[currentIndex];
+    final elapsedMs = DateTime.now().difference(questionStartTime!).inMilliseconds;
+    final responseTime = elapsedMs / 1000.0;
+    final correct = index != null && index == question.correctIndex;
+    final points = kDifficultyPoints[widget.difficulty]!;
+
+    setState(() {
+      answered = true;
+      selectedOption = index;
+
+      if (correct) {
+        correctCount++;
+        currentStreak++;
+        if (currentStreak > maxStreakInMatch) maxStreakInMatch = currentStreak;
+        qi += points;
+      } else {
+        wrongCount++;
+        currentStreak = 0;
+        qi -= points * 0.10;
+        if (qi < 0) qi = 0;
+      }
+
+      final newly = GameStats.instance.registerAnswer(
+        correct: correct,
+        difficulty: widget.difficulty,
+        category: question.original.category,
+        responseTimeSeconds: responseTime,
+        currentStreak: currentStreak,
+        currentQI: qi,
+      );
+      unlockedThisMatch.addAll(newly);
+    });
+
+    Future.delayed(const Duration(milliseconds: 1300), () {
+      if (!mounted) return;
+      if (currentIndex + 1 < matchQuestions.length) {
+        setState(() => currentIndex++);
+        _startQuestion();
+      } else {
+        _finishMatch();
+      }
+    });
+  }
+
+  void _finishMatch() {
+    final newly = GameStats.instance.finishMatch(
+      difficulty: widget.difficulty,
+      wrongInMatch: wrongCount,
+      finalQI: qi,
+    );
+    unlockedThisMatch.addAll(newly);
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ResultScreen(
+          difficulty: widget.difficulty,
+          finalQI: qi,
+          correctCount: correctCount,
+          wrongCount: wrongCount,
+          totalQuestions: matchQuestions.length,
+          unlockedIds: unlockedThisMatch.toList(),
+        ),
+      ),
+    );
+  }
+
+  Color _optionColor(int idx, PreparedQuestion q) {
+    if (!answered) return Colors.white;
+    if (idx == q.correctIndex) return const Color(0xFFBFE6C4);
+    if (idx == selectedOption) return const Color(0xFFF3C0C0);
+    return Colors.white;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final question = matchQuestions[currentIndex];
+    final color = kDifficultyColor[widget.difficulty]!;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('${kDifficultyLabel[widget.difficulty]}  •  Pergunta ${currentIndex + 1}/${matchQuestions.length}'),
+      ),
+      body: Column(
+        children: [
+          // Barra de progresso do tempo
+          ClipRRect(
+            borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(6), bottomRight: Radius.circular(6)),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: timeLeft / totalTime),
+              duration: const Duration(milliseconds: 350),
+              builder: (context, value, _) => LinearProgressIndicator(
+                value: value.clamp(0, 1),
+                minHeight: 7,
+                backgroundColor: Colors.grey.shade300,
+                valueColor: AlwaysStoppedAnimation(timeLeft <= 5 ? Colors.redAccent : color),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.psychology, color: kStoneDark, size: 20),
+                    const SizedBox(width: 6),
+                    Text('QI: ${formatQI(qi)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: kStoneDark)),
+                  ],
+                ),
+                Row(
+                  children: [
+                    Icon(Icons.timer_outlined, color: timeLeft <= 5 ? Colors.redAccent : kTextMuted, size: 20),
+                    const SizedBox(width: 6),
+                    Text(
+                      '${timeLeft}s',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: timeLeft <= 5 ? Colors.redAccent : kTextMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(color: color.withOpacity(0.15), borderRadius: BorderRadius.circular(8)),
+                    child: Text(
+                      question.original.category,
+                      style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    question.original.text,
+                    style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: kTextDark, height: 1.35),
+                  ),
+                  const SizedBox(height: 22),
+                  for (int i = 0; i < question.options.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _OptionTile(
+                        letter: String.fromCharCode(65 + i),
+                        text: question.options[i],
+                        color: _optionColor(i, question),
+                        badgeColor: color,
+                        onTap: () => _handleAnswer(i),
+                        showIcon: answered && i == question.correctIndex,
+                        showWrongIcon: answered && i == selectedOption && i != question.correctIndex,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OptionTile extends StatelessWidget {
+  final String letter;
+  final String text;
+  final Color color;
+  final Color badgeColor;
+  final VoidCallback onTap;
+  final bool showIcon;
+  final bool showWrongIcon;
+
+  const _OptionTile({
+    required this.letter,
+    required this.text,
+    required this.color,
+    required this.badgeColor,
+    required this.onTap,
+    required this.showIcon,
+    required this.showWrongIcon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final resultBorder = showIcon
+        ? const Color(0xFF3F9A56)
+        : showWrongIcon
+            ? const Color(0xFFD16A6A)
+            : Colors.transparent;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: resultBorder, width: 2),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 3)),
+        ],
+      ),
+      child: Material(
+        color: color,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 15,
+                  backgroundColor: (showIcon || showWrongIcon) ? Colors.transparent : badgeColor.withOpacity(0.12),
+                  child: Text(
+                    letter,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      color: (showIcon || showWrongIcon) ? kTextDark : badgeColor,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(text, style: const TextStyle(fontSize: 15, color: kTextDark, height: 1.3)),
+                ),
+                if (showIcon) const Icon(Icons.check_circle, color: Color(0xFF3F9A56)),
+                if (showWrongIcon) const Icon(Icons.cancel, color: Color(0xFFD16A6A)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// TELA DE RESULTADO
+// ============================================================================
+
+class ResultScreen extends StatelessWidget {
+  final Difficulty difficulty;
+  final double finalQI;
+  final int correctCount;
+  final int wrongCount;
+  final int totalQuestions;
+  final List<String> unlockedIds;
+
+  const ResultScreen({
+    super.key,
+    required this.difficulty,
+    required this.finalQI,
+    required this.correctCount,
+    required this.wrongCount,
+    required this.totalQuestions,
+    required this.unlockedIds,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final unlockedAchievements = kAchievements.where((a) => unlockedIds.contains(a.id)).toList();
+
+    return Scaffold(
+      backgroundColor: kStoneDark,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            children: [
+              const SizedBox(height: 12),
+              const Icon(Icons.emoji_events_rounded, color: kGold, size: 56),
+              const SizedBox(height: 12),
+              const Text('Partida concluída!', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(color: kStoneDarker, borderRadius: BorderRadius.circular(16)),
+                child: Column(
+                  children: [
+                    const Text('QI FINAL', style: TextStyle(color: kGold, fontWeight: FontWeight.bold, letterSpacing: 1.5, fontSize: 12)),
+                    const SizedBox(height: 6),
+                    Text(formatQI(finalQI), style: const TextStyle(color: Colors.white, fontSize: 44, fontWeight: FontWeight.w900)),
+                    const SizedBox(height: 14),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _ResultStat(label: 'Acertos', value: '$correctCount/$totalQuestions'),
+                        _ResultStat(label: 'Erros', value: '$wrongCount/$totalQuestions'),
+                        _ResultStat(label: 'Dificuldade', value: kDifficultyLabel[difficulty]!),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              if (unlockedAchievements.isNotEmpty) ...[
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Novas conquistas', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                ),
+                const SizedBox(height: 10),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: unlockedAchievements.length,
+                    itemBuilder: (context, i) {
+                      final a = unlockedAchievements[i];
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: kStoneDarker, borderRadius: BorderRadius.circular(12)),
+                        child: Row(
+                          children: [
+                            const CircleAvatar(backgroundColor: kGold, radius: 18, child: Icon(Icons.star, color: kStoneDark, size: 18)),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(a.title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                  Text(a.description, style: const TextStyle(color: Color(0xFFB9D0BC), fontSize: 12)),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ] else
+                const Spacer(),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Colors.white54),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: () {
+                        Navigator.pushAndRemoveUntil(
+                          context,
+                          MaterialPageRoute(builder: (_) => const HomeScreen()),
+                          (route) => false,
+                        );
+                      },
+                      child: const Text('Menu', style: TextStyle(color: Colors.white)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kGold,
+                        foregroundColor: kStoneDarker,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: () {
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(builder: (_) => QuizScreen(difficulty: difficulty)),
+                        );
+                      },
+                      child: const Text('Jogar novamente', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ResultStat extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _ResultStat({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(value, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 2),
+        Text(label, style: const TextStyle(color: Color(0xFFB9D0BC), fontSize: 11)),
+      ],
+    );
+  }
+}
+
+// ============================================================================
+// TELA DE ESTATÍSTICAS
+// ============================================================================
+
+class StatisticsScreen extends StatelessWidget {
+  const StatisticsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final stats = GameStats.instance;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Estatísticas')),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          _StatCard(icon: Icons.psychology, label: 'QI máximo alcançado', value: formatQI(stats.maxQI == 0 ? 100 : stats.maxQI)),
+          _StatCard(icon: Icons.quiz, label: 'Perguntas respondidas', value: '${stats.totalQuestions}'),
+          _StatCard(
+            icon: Icons.check_circle_outline,
+            label: 'Acertos / Erros',
+            value: '${stats.totalCorrect} / ${stats.totalWrong}  (${stats.accuracy.toStringAsFixed(0)}% de aproveitamento)',
+          ),
+          _StatCard(icon: Icons.local_fire_department, label: 'Sequência máxima de acertos', value: '${stats.bestStreakEver}'),
+          _StatCard(icon: Icons.timer, label: 'Tempo médio de resposta', value: '${stats.avgResponseTime.toStringAsFixed(1)}s'),
+          _StatCard(icon: Icons.sports_esports, label: 'Partidas jogadas', value: '${stats.gamesPlayed}'),
+          _StatCard(
+            icon: Icons.emoji_events,
+            label: 'Conquistas desbloqueadas',
+            value: '${stats.unlockedAchievements.length} / ${kAchievements.length}',
+          ),
+          _StatCard(icon: Icons.trending_up, label: 'Categoria mais forte', value: stats.strongestCategory ?? '—'),
+          _StatCard(icon: Icons.trending_down, label: 'Categoria a reforçar', value: stats.weakestCategory ?? '—'),
+          const SizedBox(height: 8),
+          const Text('Desempenho por dificuldade', style: TextStyle(fontWeight: FontWeight.bold, color: kTextDark, fontSize: 15)),
+          const SizedBox(height: 10),
+          for (final d in Difficulty.values)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                children: [
+                  CircleAvatar(radius: 6, backgroundColor: kDifficultyColor[d]),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(kDifficultyLabel[d]!, style: const TextStyle(color: kTextDark))),
+                  Text(
+                    '${stats.correctByDifficulty[d] ?? 0} acertos / ${stats.wrongByDifficulty[d] ?? 0} erros',
+                    style: const TextStyle(color: kTextMuted, fontSize: 12.5),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _StatCard({required this.icon, required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ListTile(
+        leading: CircleAvatar(backgroundColor: kGold, child: Icon(icon, color: kStoneDark, size: 20)),
+        title: Text(label, style: const TextStyle(fontSize: 13, color: kTextMuted)),
+        subtitle: Text(value, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: kTextDark)),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// TELA DE CONQUISTAS
+// ============================================================================
+
+class AchievementsScreen extends StatelessWidget {
+  const AchievementsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final unlocked = GameStats.instance.unlockedAchievements;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Conquistas')),
+      body: ListView.builder(
+        padding: const EdgeInsets.all(20),
+        itemCount: kAchievements.length,
+        itemBuilder: (context, i) {
+          final a = kAchievements[i];
+          final isUnlocked = unlocked.contains(a.id);
+          return Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            elevation: isUnlocked ? 2 : 0,
+            color: isUnlocked ? Colors.white : const Color(0xFFEFEFEF),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundColor: isUnlocked ? kGold : Colors.grey.shade400,
+                child: Icon(isUnlocked ? Icons.star : Icons.lock_outline, color: Colors.white, size: 20),
+              ),
+              title: Text(
+                a.title,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: isUnlocked ? kTextDark : kTextMuted,
+                ),
+              ),
+              subtitle: Text(a.description, style: const TextStyle(fontSize: 12.5, color: kTextMuted)),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
